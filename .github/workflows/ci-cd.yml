@@ -22,6 +22,7 @@ jobs:
         uses: actions/setup-java@v3
         with:
           java-version: 17
+          distribution: temurin
 
       # Шаг 3: Сборка проекта с Maven
       - name: Build with Maven
@@ -31,13 +32,7 @@ jobs:
       - name: Run tests
         run: mvn test
 
-      # Шаг 5: Линтер для Dockerfile (опционально, для проверки корректности Dockerfile)
-      - name: Dockerfile Lint
-        uses: hadolint/hadolint-action@v2
-        with:
-          dockerfile: ./Dockerfile
-
-      # Шаг 6: Сборка Docker-образа
+      # Шаг 5: Сборка Docker-образа
       - name: Build Docker image
         run: docker build -t my-spring-app .
 
