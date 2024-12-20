@@ -1,5 +1,6 @@
-name: CI/CD Pipeline for Dockerized Spring App
+name: CI/CD Pipeline
 
+# Используем стратегию матрицы для кроссплатформенной сборки (Linux и Windows)
 on:
   push:
     branches:
@@ -9,47 +10,83 @@ on:
       - main
 
 jobs:
-  build-and-test:
-    runs-on: ubuntu-latest
-
+  build:
+    runs-on: ubuntu-latest  # На Ubuntu
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]  # Для разных ОС
     steps:
-      # Шаг 1: Проверка кода из репозитория
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Шаг 2: Установка JDK
-      - name: Setup JDK 17
+      # Устанавливаем JDK 17
+      - name: Setup JDK
         uses: actions/setup-java@v3
         with:
           java-version: 17
-          distribution: temurin
 
-      # Шаг 3: Сборка проекта с Maven
+      # Устанавливаем Maven
+      - name: Set up Maven
+        uses: actions/setup-java@v3
+        with:
+          java-version: 17
+          maven-version: 3.8.4
+
+      # Сборка проекта с помощью Maven
       - name: Build with Maven
-        run: mvn clean package
+        run: mvn clean install
 
-      # Шаг 4: Запуск тестов
+      # Тестируем проект (если у вас есть тесты)
       - name: Run tests
         run: mvn test
 
-      # Шаг 5: Сборка Docker-образа
-      - name: Build Docker image
-        run: docker build -t my-spring-app .
-
-  deploy:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-
+  # Публикация Docker образа
+  docker-push:
+    runs-on: ubuntu-latest  # Убедитесь, что вы используете Linux для работы с Docker
+    needs: build  # Этот шаг выполняется только после завершения сборки
     steps:
-      # Шаг 1: Деплой через SSH на удаленный сервер
-      - name: Deploy to remote server
-        uses: appleboy/ssh-action@v0.1.8
+      - name: DockerHub Login
+        uses: docker/login-action@v2
         with:
-          host: ${{ secrets.REMOTE_HOST }}
-          username: ${{ secrets.REMOTE_USER }}
-          password: ${{ secrets.REMOTE_PASSWORD }}
-          script: |
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build Docker image
+        run: |
+          docker build -t my-spring-app:latest .
+        
+      - name: Tag Docker image
+        run: |
+          docker tag my-spring-app:latest ${{ secrets.DOCKER_USERNAME }}/my-spring-app:latest
+
+      - name: Push Docker image to DockerHub
+        run: |
+          docker push ${{ secrets.DOCKER_USERNAME }}/my-spring-app:latest
+
+  # Деплой на удаленный сервер через SSH
+  deploy:
+    runs-on: ubuntu-latest  # Используем Linux для деплоя
+    needs: docker-push  # Этот шаг выполняется после успешного пуша Docker образа
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Настроим SSH
+      - name: Set up SSH keys
+        uses: webfactory/ssh-agent@v0.5.3
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      # Подключаемся к серверу и деплоим приложение
+      - name: Deploy to remote server
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.REMOTE_USER }}@${{ secrets.REMOTE_HOST }} << 'EOF'
             docker pull ${{ secrets.DOCKER_USERNAME }}/my-spring-app:latest
             docker stop my-spring-app || true
             docker rm my-spring-app || true
-            docker run -d -p 8080:8080 --name my-spring-app ${{ secrets.DOCKER_USERNAME }}/my-spring-app:latest
+            docker run -d --name my-spring-app -p 8080:8080 ${{ secrets.DOCKER_USERNAME }}/my-spring-app:latest
+          EOF
+        env:
+          REMOTE_USER: ${{ secrets.REMOTE_USER }}
+          REMOTE_HOST: ${{ secrets.REMOTE_HOST }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
